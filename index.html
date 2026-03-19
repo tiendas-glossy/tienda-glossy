@@ -242,7 +242,6 @@
                     <a href="#" class="text-gray-600 hover:text-glossy font-medium text-xs md:text-sm transition">Inicio</a>
                     <a href="#sobre-nosotros" class="text-gray-600 hover:text-glossy font-medium text-xs md:text-sm transition">Nosotros</a>
                     
-                    <!-- ENLACES DE REDES SOCIALES -->
                     <a href="https://instagram.com/TU_PERFIL" target="_blank" class="text-gray-400 hover:text-[#E1306C] transition text-lg">
                         <i class="fa-brands fa-instagram"></i>
                     </a>
@@ -269,7 +268,6 @@
                     </button>
                 </div>
 
-                <!-- CONFIGURACIÓN DE IDENTIDAD -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                     <div class="p-4 bg-white rounded-xl border border-gray-100">
                         <label class="text-xs font-bold text-gray-500 uppercase block mb-2">Logo URL</label>
@@ -287,7 +285,6 @@
                     </div>
                 </div>
 
-                <!-- GESTIÓN DE USUARIOS (NUEVO) -->
                 <div class="mb-6 p-4 bg-white rounded-xl border border-gray-100">
                     <h3 class="text-sm font-bold text-gray-700 uppercase mb-4 flex items-center gap-2">
                         <i class="fa-solid fa-users-gear text-glossy"></i> Gestión de Usuarios
@@ -297,15 +294,14 @@
                         <input type="password" id="nuevaClave" placeholder="Nueva Contraseña" class="flex-1 px-3 py-2 border rounded-lg focus:border-glossy outline-none text-sm bg-gray-50">
                         <button onclick="agregarUsuario()" class="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-bold transition hover:bg-black">Crear Usuario</button>
                     </div>
-                    <div id="lista-usuarios" class="flex flex-wrap gap-2">
-                        <!-- Los usuarios aparecerán aquí -->
-                    </div>
+                    <div id="lista-usuarios" class="flex flex-wrap gap-2"></div>
                 </div>
                 
                 <hr class="border-gray-200 mb-6">
 
                 <form id="formProducto" class="space-y-4">
                     <input type="hidden" id="editIndex" value="-1">
+                    <input type="hidden" id="editDocId" value="">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <input type="text" id="nombre" required placeholder="Nombre del Producto" class="w-full px-4 py-2 border rounded-lg focus:border-glossy outline-none bg-white">
                         <input type="number" id="precio" step="0.01" required placeholder="Precio (Lempiras)" class="w-full px-4 py-2 border rounded-lg focus:border-glossy outline-none bg-white">
@@ -367,7 +363,7 @@
         </div>
     </main>
 
-    <!-- FOOTER / CONTACTO -->
+    <!-- FOOTER -->
     <footer class="bg-white border-t border-gray-100 py-12">
         <div class="max-w-7xl mx-auto px-4 text-center">
             <h3 class="font-serif text-2xl font-bold text-glossy-dark mb-4">Glossy</h3>
@@ -387,110 +383,92 @@
         </div>
     </footer>
 
-    <script>
-        const NUMERO_WHATSAPP = "50488968984";
-        
-        // Base de datos de usuarios inicial
-        let usuariosAdmin = JSON.parse(localStorage.getItem('usuarios_glossy')) || [
-            { user: "admin", pass: "TiendasGlossyHN1234" }
-        ];
+    <!-- LÓGICA DE FIREBASE Y FUNCIONES -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        let productos = JSON.parse(localStorage.getItem('productos_glossy')) || [];
+        // CONFIGURACIÓN DE FIREBASE
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        const NUMERO_WHATSAPP = "50488968984";
+        let userAuth = null;
+        let productos = [];
         let indexProductoAbierto = -1;
         let fotoActualModal = 0;
+        let configTienda = {};
+        let usuariosAdmin = [];
 
-        document.addEventListener('DOMContentLoaded', () => {
-            renderProductos();
-            cargarLogo();
-            cargarSobreNosotros();
-            toggleCantidadOferta();
-            renderUsuarios();
+        // INICIALIZACIÓN DE DATOS
+        const init = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+
+        onAuthStateChanged(auth, (u) => {
+            userAuth = u;
+            if (userAuth) {
+                escucharProductos();
+                escucharConfiguracion();
+                escucharUsuarios();
+            }
         });
 
-        // FUNCIONES DE USUARIOS
-        function renderUsuarios() {
-            const list = document.getElementById('lista-usuarios');
-            if(!list) return;
-            list.innerHTML = usuariosAdmin.map((u, i) => `
-                <div class="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full text-[11px] font-bold text-gray-600">
-                    <i class="fa-solid fa-user text-[9px]"></i> ${u.user}
-                    ${i > 0 ? `<button onclick="eliminarUsuario(${i})" class="text-red-400 hover:text-red-600 ml-1"><i class="fa-solid fa-circle-xmark"></i></button>` : ''}
-                </div>
-            `).join('');
+        init();
+
+        // ESCUCHADORES EN TIEMPO REAL (NUBE)
+        function escucharProductos() {
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'productos');
+            onSnapshot(colRef, (snapshot) => {
+                productos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderProductos();
+                if (indexProductoAbierto !== -1) {
+                    const prodActualizado = productos.find(p => p.id === productos[indexProductoAbierto]?.id);
+                    if (prodActualizado) renderComentariosModal(prodActualizado.opiniones || []);
+                }
+            }, (err) => console.error("Error productos:", err));
         }
 
-        function agregarUsuario() {
-            const u = document.getElementById('nuevoUsuario').value.trim();
-            const p = document.getElementById('nuevaClave').value.trim();
-            if(!u || !p) { alert("Completa ambos campos"); return; }
-            if(usuariosAdmin.some(user => user.user === u)) { alert("Este usuario ya existe"); return; }
-            usuariosAdmin.push({ user: u, pass: p });
-            localStorage.setItem('usuarios_glossy', JSON.stringify(usuariosAdmin));
-            renderUsuarios();
-            document.getElementById('nuevoUsuario').value = '';
-            document.getElementById('nuevaClave').value = '';
+        function escucharConfiguracion() {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'configuracion');
+            onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    configTienda = docSnap.data();
+                    aplicarConfiguracion();
+                } else {
+                    // Valores por defecto si no existe en la nube
+                    const def = {
+                        logo: "",
+                        sobreNosotros: "Bienvenida a Glossy, tu destino favorito para el maquillaje y los accesorios..."
+                    };
+                    setDoc(docRef, def);
+                }
+            }, (err) => console.error("Error config:", err));
         }
 
-        function eliminarUsuario(i) {
-            if(confirm("¿Eliminar este usuario administrador?")) {
-                usuariosAdmin.splice(i, 1);
-                localStorage.setItem('usuarios_glossy', JSON.stringify(usuariosAdmin));
-                renderUsuarios();
-            }
+        function escucharUsuarios() {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'usuarios');
+            onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    usuariosAdmin = docSnap.data().lista || [{ user: "admin", pass: "TiendasGlossyHN1234" }];
+                    renderUsuarios();
+                } else {
+                    const def = { lista: [{ user: "admin", pass: "TiendasGlossyHN1234" }] };
+                    setDoc(docRef, def);
+                }
+            }, (err) => console.error("Error usuarios:", err));
         }
 
-        function cargarLogo() {
-            const logoUrl = localStorage.getItem('glossy_logo');
-            const img = document.getElementById('logo-img');
-            const text = document.getElementById('logo-text');
-            const input = document.getElementById('inputUrlLogo');
-            if (input) input.value = logoUrl || '';
-            if (logoUrl) {
-                img.src = logoUrl;
-                img.classList.remove('hidden');
-                text.classList.add('hidden');
-            } else {
-                img.classList.add('hidden');
-                text.classList.remove('hidden');
-            }
-        }
-
-        function guardarLogo() {
-            const url = document.getElementById('inputUrlLogo').value.trim();
-            localStorage.setItem('glossy_logo', url);
-            cargarLogo();
-        }
-
-        function cargarSobreNosotros() {
-            const textoDefault = "Bienvenida a Glossy, tu destino favorito para el maquillaje y los accesorios que realzan tu belleza única. Nos apasiona ofrecerte productos de alta calidad que te hagan sentir segura y radiante todos los días.";
-            const guardado = localStorage.getItem('glossy_sobre_nosotros') || textoDefault;
-            document.getElementById('texto-sobre-nosotros').innerText = guardado;
-            const input = document.getElementById('inputSobreNosotros');
-            if(input) input.value = guardado;
-        }
-
-        function guardarSobreNosotros() {
-            const texto = document.getElementById('inputSobreNosotros').value.trim();
-            if(texto) {
-                localStorage.setItem('glossy_sobre_nosotros', texto);
-                cargarSobreNosotros();
-                alert("Texto de 'Sobre Nosotros' actualizado con éxito.");
-            }
-        }
-
-        function toggleCantidadOferta() {
-            const isChecked = document.getElementById('esOferta').checked;
-            const container = document.getElementById('containerCantidad');
-            if(isChecked) {
-                container.classList.remove('hidden');
-                container.classList.add('flex');
-            } else {
-                container.classList.add('hidden');
-                container.classList.remove('flex');
-            }
-        }
-
-        function renderProductos() {
+        // FUNCIONES DE INTERFAZ (Mantenidas exactas)
+        window.renderProductos = () => {
             const contenedor = document.getElementById('contenedor-productos');
             contenedor.innerHTML = '';
             productos.forEach((prod, index) => {
@@ -507,7 +485,7 @@
                             <img src="${imgArr[0]}" class="imagen-producto" onerror="this.src='https://placehold.co/400x400?text=Imagen'">
                             <div class="admin-only absolute top-4 right-4 z-30 flex flex-col gap-2">
                                 <button onclick="event.stopPropagation(); prepararEdicion(${index})" class="bg-white/90 text-blue-600 w-8 h-8 flex items-center justify-center rounded-full shadow-md"><i class="fa-solid fa-pen text-xs"></i></button>
-                                <button onclick="event.stopPropagation(); eliminarProducto(${index})" class="bg-white/90 text-red-600 w-8 h-8 flex items-center justify-center rounded-full shadow-md"><i class="fa-solid fa-trash text-xs"></i></button>
+                                <button onclick="event.stopPropagation(); eliminarProducto('${prod.id}')" class="bg-white/90 text-red-600 w-8 h-8 flex items-center justify-center rounded-full shadow-md"><i class="fa-solid fa-trash text-xs"></i></button>
                             </div>
                         </div>
                         <div class="p-6">
@@ -521,9 +499,125 @@
                     </div>
                 `;
             });
+        };
+
+        function aplicarConfiguracion() {
+            const img = document.getElementById('logo-img');
+            const text = document.getElementById('logo-text');
+            const inputLogo = document.getElementById('inputUrlLogo');
+            const txtSobre = document.getElementById('texto-sobre-nosotros');
+            const inputSobre = document.getElementById('inputSobreNosotros');
+
+            if (configTienda.logo) {
+                img.src = configTienda.logo;
+                img.classList.remove('hidden');
+                text.classList.add('hidden');
+            } else {
+                img.classList.add('hidden');
+                text.classList.remove('hidden');
+            }
+            if (inputLogo) inputLogo.value = configTienda.logo || "";
+            if (txtSobre) txtSobre.innerText = configTienda.sobreNosotros || "";
+            if (inputSobre) inputSobre.value = configTienda.sobreNosotros || "";
         }
 
-        window.abrirProducto = function(index) {
+        window.guardarLogo = async () => {
+            const url = document.getElementById('inputUrlLogo').value.trim();
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configuracion'), { logo: url });
+        };
+
+        window.guardarSobreNosotros = async () => {
+            const texto = document.getElementById('inputSobreNosotros').value.trim();
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configuracion'), { sobreNosotros: texto });
+            alert("Información actualizada.");
+        };
+
+        // GESTIÓN DE USUARIOS
+        window.renderUsuarios = () => {
+            const list = document.getElementById('lista-usuarios');
+            if(!list) return;
+            list.innerHTML = usuariosAdmin.map((u, i) => `
+                <div class="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full text-[11px] font-bold text-gray-600">
+                    <i class="fa-solid fa-user text-[9px]"></i> ${u.user}
+                    ${i > 0 ? `<button onclick="eliminarUsuario(${i})" class="text-red-400 hover:text-red-600 ml-1"><i class="fa-solid fa-circle-xmark"></i></button>` : ''}
+                </div>
+            `).join('');
+        };
+
+        window.agregarUsuario = async () => {
+            const u = document.getElementById('nuevoUsuario').value.trim();
+            const p = document.getElementById('nuevaClave').value.trim();
+            if(!u || !p) return;
+            if(usuariosAdmin.some(user => user.user === u)) return;
+            const nuevaLista = [...usuariosAdmin, { user: u, pass: p }];
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios'), { lista: nuevaLista });
+            document.getElementById('nuevoUsuario').value = '';
+            document.getElementById('nuevaClave').value = '';
+        };
+
+        window.eliminarUsuario = async (i) => {
+            if(confirm("¿Eliminar usuario?")) {
+                const nuevaLista = usuariosAdmin.filter((_, idx) => idx !== i);
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios'), { lista: nuevaLista });
+            }
+        };
+
+        // GESTIÓN DE PRODUCTOS
+        document.getElementById('formProducto').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const docId = document.getElementById('editDocId').value;
+            const isO = document.getElementById('esOferta').checked;
+            const data = {
+                nombre: document.getElementById('nombre').value,
+                precio: parseFloat(document.getElementById('precio').value).toFixed(2),
+                imagen: document.getElementById('imagen').value,
+                descripcion: document.getElementById('descripcion').value,
+                esOferta: isO,
+                cantidadOferta: isO ? parseInt(document.getElementById('cantidadOferta').value) || 0 : 0
+            };
+
+            if(!docId) {
+                data.opiniones = [];
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'productos'), data);
+            } else {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'productos', docId), data);
+                cancelarEdicion();
+            }
+            e.target.reset();
+            toggleCantidadOferta();
+        });
+
+        window.prepararEdicion = (i) => {
+            const p = productos[i];
+            document.getElementById('editDocId').value = p.id;
+            document.getElementById('nombre').value = p.nombre;
+            document.getElementById('precio').value = p.precio;
+            document.getElementById('imagen').value = p.imagen;
+            document.getElementById('descripcion').value = p.descripcion;
+            document.getElementById('esOferta').checked = p.esOferta;
+            document.getElementById('cantidadOferta').value = p.cantidadOferta || '';
+            document.getElementById('btnText').innerText = "Guardar Cambios en Nube";
+            document.getElementById('btnCancelarEdit').classList.remove('hidden');
+            toggleCantidadOferta();
+            window.scrollTo(0, 0);
+        };
+
+        window.cancelarEdicion = () => {
+            document.getElementById('formProducto').reset();
+            document.getElementById('editDocId').value = "";
+            document.getElementById('btnText').innerText = "Publicar Producto";
+            document.getElementById('btnCancelarEdit').classList.add('hidden');
+            toggleCantidadOferta();
+        };
+
+        window.eliminarProducto = async (id) => {
+            if(confirm("¿Eliminar de la nube?")) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'productos', id));
+            }
+        };
+
+        // DETALLE Y COMENTARIOS
+        window.abrirProducto = (index) => {
             indexProductoAbierto = index;
             fotoActualModal = 0;
             const prod = productos[index];
@@ -540,12 +634,11 @@
 
             renderImagenModal(imgs);
             renderComentariosModal(prod.opiniones || []);
-            document.getElementById('modal-btn-compra').onclick = () => hacerPedido(prod.nombre, prod.precio);
             document.getElementById('modalProducto').classList.add('show');
             document.body.style.overflow = 'hidden';
-        }
+        };
 
-        function renderImagenModal(imgs) {
+        window.renderImagenModal = (imgs) => {
             const img = document.getElementById('modal-img');
             const cnt = document.getElementById('modal-counter');
             img.src = imgs[fotoActualModal];
@@ -555,9 +648,9 @@
                 document.getElementById('modal-prev').onclick = () => { fotoActualModal = (fotoActualModal - 1 + imgs.length) % imgs.length; renderImagenModal(imgs); };
                 document.getElementById('modal-next').onclick = () => { fotoActualModal = (fotoActualModal + 1) % imgs.length; renderImagenModal(imgs); };
             } else { cnt.classList.add('hidden'); }
-        }
+        };
 
-        function renderComentariosModal(ops) {
+        window.renderComentariosModal = (ops) => {
             const list = document.getElementById('modal-comments-list');
             list.innerHTML = ops.length ? ops.map(o => `
                 <div class="comment-item pb-4">
@@ -565,102 +658,67 @@
                     <p class="text-sm text-gray-700 bg-gray-50 p-3 rounded-xl">${o.text}</p>
                 </div>
             `).join('') : '<p class="text-xs text-gray-400 italic">Sin opiniones aún.</p>';
-        }
+        };
 
-        function guardarComentarioModal() {
+        window.guardarComentarioModal = async () => {
             const t = document.getElementById('modal-comment-text').value.trim();
             const s = parseInt(document.getElementById('modal-rating-val').value);
-            if(!t) return;
-            if(!productos[indexProductoAbierto].opiniones) productos[indexProductoAbierto].opiniones = [];
-            productos[indexProductoAbierto].opiniones.unshift({stars: s, text: t, date: new Date().toISOString()});
-            localStorage.setItem('productos_glossy', JSON.stringify(productos));
-            renderComentariosModal(productos[indexProductoAbierto].opiniones);
+            if(!t || indexProductoAbierto === -1) return;
+            
+            const prod = productos[indexProductoAbierto];
+            const nuevasOp = [{ stars: s, text: t, date: new Date().toISOString() }, ...(prod.opiniones || [])];
+            
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'productos', prod.id), { opiniones: nuevasOp });
             document.getElementById('modal-comment-text').value = '';
-        }
+        };
 
-        window.cerrarModalProducto = () => { document.getElementById('modalProducto').classList.remove('show'); document.body.style.overflow = 'auto'; }
+        window.cerrarModalProducto = () => { 
+            document.getElementById('modalProducto').classList.remove('show'); 
+            document.body.style.overflow = 'auto'; 
+            indexProductoAbierto = -1;
+        };
 
+        // UTILIDADES Y ACCESO
+        window.toggleCantidadOferta = () => {
+            const isChecked = document.getElementById('esOferta').checked;
+            const container = document.getElementById('containerCantidad');
+            if(isChecked) { container.classList.replace('hidden', 'flex'); } else { container.classList.replace('flex', 'hidden'); }
+        };
+
+        window.validarAcceso = () => {
+            const user = document.getElementById('userAdmin').value;
+            const pass = document.getElementById('passAdmin').value;
+            const match = usuariosAdmin.find(u => u.user === user && u.pass === pass);
+            if(match) {
+                document.body.classList.add('admin-active');
+                document.getElementById('modalLogin').classList.remove('show');
+            } else alert("Datos incorrectos");
+        };
+
+        window.hacerPedido = (n, p) => {
+            window.open(`https://wa.me/${NUMERO_WHATSAPP}?text=Me interesa: *${n}* (L. ${p})`, '_blank');
+        };
+
+        window.toggleAdmin = () => {
+            if(document.body.classList.contains('admin-active')) { 
+                document.body.classList.remove('admin-active'); 
+            } else { 
+                document.getElementById('modalLogin').classList.add('show'); 
+            }
+        };
+
+        window.cerrarModalLogin = () => document.getElementById('modalLogin').classList.remove('show');
+        window.cerrarSesionAdmin = () => document.body.classList.remove('admin-active');
         window.setStarModal = (v) => {
             document.getElementById('modal-rating-val').value = v;
             document.querySelectorAll('#modal-star-input .fa-star').forEach((s, i) => s.classList.toggle('active', i < v));
-        }
-
-        function toggleAdmin() {
-            if(document.body.classList.contains('admin-active')) { cerrarSesionAdmin(); return; }
-            document.getElementById('modalLogin').classList.add('show');
-        }
-
-        function cerrarModalLogin() { document.getElementById('modalLogin').classList.remove('show'); }
-
-        function validarAcceso() {
-            const user = document.getElementById('userAdmin').value;
-            const pass = document.getElementById('passAdmin').value;
-            
-            const match = usuariosAdmin.find(u => u.user === user && u.pass === pass);
-            
-            if(match) {
-                document.body.classList.add('admin-active');
-                cerrarModalLogin();
-                renderProductos();
-                document.getElementById('userAdmin').value = '';
-                document.getElementById('passAdmin').value = '';
-            } else {
-                alert("Usuario o contraseña incorrectos");
-            }
-        }
-
-        function cerrarSesionAdmin() { document.body.classList.remove('admin-active'); renderProductos(); }
-
-        function prepararEdicion(i) {
-            const p = productos[i];
-            document.getElementById('editIndex').value = i;
-            document.getElementById('nombre').value = p.nombre;
-            document.getElementById('precio').value = p.precio;
-            document.getElementById('imagen').value = p.imagen;
-            document.getElementById('descripcion').value = p.descripcion;
-            document.getElementById('esOferta').checked = p.esOferta;
-            document.getElementById('cantidadOferta').value = p.cantidadOferta || '';
-            document.getElementById('btnText').innerText = "Guardar Cambios";
-            document.getElementById('btnCancelarEdit').classList.remove('hidden');
-            toggleCantidadOferta();
-            window.scrollTo(0, 0);
-        }
-
-        function cancelarEdicion() {
-            document.getElementById('formProducto').reset();
-            document.getElementById('editIndex').value = "-1";
-            document.getElementById('btnText').innerText = "Publicar Producto";
-            document.getElementById('btnCancelarEdit').classList.add('hidden');
-            toggleCantidadOferta();
-        }
-
-        document.getElementById('formProducto').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const idx = parseInt(document.getElementById('editIndex').value);
-            const isO = document.getElementById('esOferta').checked;
-            const data = {
-                nombre: document.getElementById('nombre').value,
-                precio: parseFloat(document.getElementById('precio').value).toFixed(2),
-                imagen: document.getElementById('imagen').value,
-                descripcion: document.getElementById('descripcion').value,
-                esOferta: isO,
-                cantidadOferta: isO ? parseInt(document.getElementById('cantidadOferta').value) || 0 : 0,
-                opiniones: idx !== -1 ? productos[idx].opiniones : []
-            };
-            if(idx === -1) productos.unshift(data); else { productos[idx] = data; cancelarEdicion(); }
-            localStorage.setItem('productos_glossy', JSON.stringify(productos));
-            renderProductos();
-            e.target.reset();
-            toggleCantidadOferta();
-        });
-
-        function eliminarProducto(i) { if(confirm("¿Eliminar?")) { productos.splice(i, 1); localStorage.setItem('productos_glossy', JSON.stringify(productos)); renderProductos(); } }
-
-        function hacerPedido(n, p) {
-            window.open(`https://wa.me/${NUMERO_WHATSAPP}?text=Me interesa: *${n}* (L. ${p})`, '_blank');
-        }
+        };
 
         document.getElementById('modal-btn-enviar').onclick = guardarComentarioModal;
+        document.getElementById('modal-btn-compra').onclick = () => {
+            const p = productos[indexProductoAbierto];
+            if(p) hacerPedido(p.nombre, p.precio);
+        };
     </script>
 </body>
 </html>
